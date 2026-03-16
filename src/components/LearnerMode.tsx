@@ -121,13 +121,44 @@ export default function LearnerMode() {
   const [selectedVoice, setSelectedVoice] = useState('en-US-BrianMultilingualNeural|');
   const [detailGender, setDetailGender] = useState<'female' | 'male'>('female');
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // 로컬: /api/tts 서버, 배포: 브라우저 Web Speech API
+  const playAudioOnce = (text: string, voice: string, locale?: string): Promise<void> =>
+    new Promise(async resolve => {
+      if (stopAllRef.current) { resolve(); return; }
+      if (import.meta.env.DEV) {
+        try {
+          const res = await fetch('/api/tts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, voice, locale }),
+          });
+          if (!res.ok) { resolve(); return; }
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          currentAudioRef.current = audio;
+          audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
+          audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
+          audio.play();
+        } catch { resolve(); }
+      } else {
+        if (!window.speechSynthesis) { resolve(); return; }
+        window.speechSynthesis.cancel();
+        const utter = new SpeechSynthesisUtterance(text);
+        utter.lang = locale || 'en-US';
+        utter.onend = () => resolve();
+        utter.onerror = () => resolve();
+        window.speechSynthesis.speak(utter);
+      }
+    });
   const [playMode, setPlayMode] = useState<null | 'once' | 'loop' | 'sentence-once' | 'sentence-loop' | 'word-once' | 'word-loop'>(null);
   const [sentencePlayIdx, setSentencePlayIdx] = useState<number | null>(null);
   const stopAllRef = useRef(false);
 
   // 날짜 목록 로드
   useEffect(() => {
-    fetch('/json/index.json')
+    fetch(`${import.meta.env.BASE_URL}json/index.json`)
       .then(res => res.json())
       .then((json: DayEntry[]) => setEntries([...json].reverse()))
       .catch(e => console.error('Could not load index.json', e));
@@ -141,7 +172,7 @@ export default function LearnerMode() {
   // ── entry 선택 (메뉴 자동 닫힘 없음) ────────────────
   const selectEntry = (entry: DayEntry) => {
     setLoading(true);
-    fetch(`/json/${entryToFilename(entry)}`)
+    fetch(`${import.meta.env.BASE_URL}json/${entryToFilename(entry)}`)
       .then(res => res.json())
       .then((json: DayFile) => {
         const sentences = json.sentences || [];
@@ -177,28 +208,8 @@ export default function LearnerMode() {
     setPlayMode(targetMode);
     setSentencePlayIdx(playIdx);
 
-    const playOne = (): Promise<void> =>
-      new Promise(async resolve => {
-        if (stopAllRef.current) { resolve(); return; }
-        try {
-          const res = await fetch('/api/tts', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              text: word,
-              voice: (detailGender === 'female' ? 'en-US-AriaNeural' : 'en-US-GuyNeural')
-            }),
-          });
-          if (!res.ok) { resolve(); return; }
-          const blob = await res.blob();
-          const url = URL.createObjectURL(blob);
-          const audio = new Audio(url);
-          currentAudioRef.current = audio;
-          audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
-          audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
-          audio.play();
-        } catch { resolve(); }
-      });
+    const playOne = () =>
+      playAudioOnce(word, detailGender === 'female' ? 'en-US-AriaNeural' : 'en-US-GuyNeural');
 
     do {
       if (stopAllRef.current) break;
@@ -221,6 +232,7 @@ export default function LearnerMode() {
   const stopPlayAll = () => {
     stopAllRef.current = true;
     currentAudioRef.current?.pause();
+    if (!import.meta.env.DEV) window.speechSynthesis?.cancel();
     setPlayMode(null);
     setSentencePlayIdx(null);
   };
@@ -238,25 +250,8 @@ export default function LearnerMode() {
     setSentencePlayIdx(idx);
 
     const voiceStr = selectedVoice;
-    const playOne = (): Promise<void> =>
-      new Promise(async resolve => {
-        if (stopAllRef.current) { resolve(); return; }
-        try {
-          const res = await fetch('/api/tts', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, voice: voiceStr.split('|')[0], locale: voiceStr.split('|')[1] || undefined }),
-          });
-          if (!res.ok) { resolve(); return; }
-          const blob = await res.blob();
-          const url = URL.createObjectURL(blob);
-          const audio = new Audio(url);
-          currentAudioRef.current = audio;
-          audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
-          audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
-          audio.play();
-        } catch { resolve(); }
-      });
+    const playOne = () =>
+      playAudioOnce(text, voiceStr.split('|')[0], voiceStr.split('|')[1] || undefined);
 
     do {
       if (stopAllRef.current) break;
@@ -279,25 +274,8 @@ export default function LearnerMode() {
     stopAllRef.current = false;
     setPlayMode(mode);
     const voiceStr = selectedVoice;
-    const playOne = (text: string): Promise<void> =>
-      new Promise(async resolve => {
-        if (stopAllRef.current) { resolve(); return; }
-        try {
-          const res = await fetch('/api/tts', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, voice: voiceStr.split('|')[0], locale: voiceStr.split('|')[1] || undefined }),
-          });
-          if (!res.ok) { resolve(); return; }
-          const blob = await res.blob();
-          const url = URL.createObjectURL(blob);
-          const audio = new Audio(url);
-          currentAudioRef.current = audio;
-          audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
-          audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
-          audio.play();
-        } catch { resolve(); }
-      });
+    const playOne = (text: string) =>
+      playAudioOnce(text, voiceStr.split('|')[0], voiceStr.split('|')[1] || undefined);
     do {
       for (const item of data) {
         if (stopAllRef.current) break;

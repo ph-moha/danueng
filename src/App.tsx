@@ -2,7 +2,7 @@ import { useState } from 'react';
 import LearnerMode from './components/LearnerMode';
 import AdminMode from './components/AdminMode';
 
-const isAdminBuild = import.meta.env.VITE_ADMIN_MODE === 'true';
+const isAdminBuild = import.meta.env.DEV && import.meta.env.VITE_ADMIN_MODE === 'true';
 
 function App() {
   const [mode, setMode] = useState<'learner' | 'admin'>('learner');
